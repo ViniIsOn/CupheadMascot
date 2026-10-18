@@ -10,9 +10,11 @@ const aim={x:1,y:0,active:false};let aimOwner=null,aimShoot=false,attackClock=.8
 const sprites={};const sprNames={idle:'cuphead_idle',run:'cuphead_run',shoot:'cuphead_shoot_straight',shootUp:'cuphead_shoot_up',shootDown:'cuphead_shoot_down',shootDiagUp:'cuphead_shoot_diagonal_up',shootDiagDown:'cuphead_shoot_diagonal_down',jump:'cuphead_jump',dash:'cuphead_dash',intro:'cuphead_intro',parry:'cuphead_parry',parryPink:'cuphead_parryPink',death:'cuphead_death',ghost:'cuphead_ghost'};
 const spriteCount={idle:5,run:12,shoot:3,shootUp:3,shootDown:3,shootDiagUp:3,shootDiagDown:3,jump:8,dash:6,intro:44,parry:8,parryPink:8,death:16,ghost:24};
 for(const [k,v] of Object.entries(sprNames)){let im=new Image();im.src='img/'+v+'.png';sprites[k]=im;}
-const PLAYER_W=80,PLAYER_H=106,FLOOR_Y=874;
-let player={x:62,y:FLOOR_Y-PLAYER_H,w:PLAYER_W,h:PLAYER_H,vx:0,vy:0,facing:1,grounded:false,hp:3,inv:0,dash:0,dashCooldown:0,shootCooldown:0};
+const PLAYER_W=64,PLAYER_H=86,FLOOR_Y=874;
+let jumpBuffer=0,coyote=0,parryCooldown=0,stuckFrames=0;
+let player={x:62,y:FLOOR_Y-PLAYER_H,w:PLAYER_W,h:PLAYER_H,vx:0,vy:0,facing:1,grounded:true,hp:3,inv:0,dash:0,dashCooldown:0,shootCooldown:0};
 let bossLife=d.bossHP,enemyBullets=[],myBullets=[],particles=[],attackTimers=[],totalTime=0,simTime=0,accumulator=0,lastFrame=performance.now(),lastRender=0,shotsHit=0;
+let lastHitSfx=-100;
 let fightState='idle',stateClock=0,fightPhase=1,warningTime=0,warned=false,shake=0,parryWindow=0,parryAnim=0,parries=0,hitsTaken=0,bulletsFired=0,phaseBanner=0,rank='C',wonLast=false,introVoicePlayed=false,readyVoicePlayed=false,parryGlow=0;
 const priorAnnouncer={intro:null,ready:null};
 let soundCtx=null,noiseNode=null;let audioEnabled=true,continuousFire=null;
@@ -20,6 +22,67 @@ const soundAsset={intro:['announcer_0001_a','announcer_0001_b','announcer_0001_c
 const soundCache={};for(const names of Object.values(soundAsset))for(const n of names){const a=new Audio('audio/'+n+'.ogg');a.preload='auto';soundCache[n]=a;}
 function playSound(tag){if(!audioEnabled)return null;const names=soundAsset[tag]||[];if(!names.length)return null;let pool=names.filter(n=>n!==priorAnnouncer[tag]);if(!pool.length)pool=names;const name=pool[Math.floor(Math.random()*pool.length)];if(tag==='intro'||tag==='ready')priorAnnouncer[tag]=name;const base=soundCache[name];try{const a=base.cloneNode();a.volume=['intro','ready','win'].includes(tag)?.94:tag==='shot'?.16:.50;const result=a.play();if(result&&result.catch)result.catch(()=>{});return a}catch(e){return null}}
 function syncShootAudio(){const active=playing&&fightState==='fight'&&!gameOver&&(input.shoot||aimShoot)&&audioEnabled;if(active){if(!continuousFire||continuousFire.paused){continuousFire=playSound('shot');if(continuousFire){continuousFire.loop=true;continuousFire.volume=.20}}}else if(continuousFire){continuousFire.pause();continuousFire.currentTime=0;continuousFire=null}}
+
+// Músicas e efeitos importados pelo próprio usuário, guardados APENAS no aparelho.
+const music={tracks:[],mode:'random',volume:.33,current:null,element:null,last:'',importing:false};
+const soundKeys={hit:[],parry:[]};let sfxLast=0;
+function musicLibrary(){
+ try{if(!bridge())return [];
+  const arr=JSON.parse(Android.listImportedMedia());music.tracks=arr.filter(x=>x.type==='music');
+  soundKeys.hit=arr.filter(x=>x.type==='hit').map(x=>x.name);
+  soundKeys.parry=arr.filter(x=>x.type==='parry').map(x=>x.name);
+  const area=$('musicList');if(area)area.textContent=music.tracks.length?music.tracks.map(t=>'♫ '+t.name).join(' • '):'Nenhuma música importada. Escolha MP3s ou o ZIP de efeitos.';
+  const fx=$('sfxCount');if(fx)fx.textContent=`Efeitos extras: ${soundKeys.hit.length} de acerto, ${soundKeys.parry.length} de parry`;
+  return arr;
+ }catch(e){toast('Não foi possível listar áudios: '+e.message);return []}
+}
+function newTrack(){if(!music.tracks.length)return null;
+ let tracks=music.tracks.filter(x=>x.name!==music.last);if(!tracks.length)tracks=music.tracks;
+ return tracks[Math.floor(Math.random()*tracks.length)]}
+function stopBattleMusic(fade=false){const a=music.element;if(!a)return;
+ music.element=null;try{a.onended=null;if(fade){a.volume=Math.min(a.volume,.08)}a.pause();a.src='';a.load()}catch(e){}
+}
+function startBattleMusic(){stopBattleMusic();if(music.mode==='off'||!bridge())return;
+ if(!music.tracks.length)musicLibrary();const item=newTrack();if(!item)return;
+ music.last=item.name;music.current=item.name;
+ const track=new Audio(Android.importedMediaUrl('music',item.name));track.preload='auto';track.volume=music.volume;
+ track.onended=()=>{if(music.element===track&&fightState==='fight')startBattleMusic()};
+ track.onerror=()=>{if(music.element===track){toast('Não foi possível tocar '+item.name);stopBattleMusic()}};
+ music.element=track;const promise=track.play();if(promise&&promise.catch)promise.catch(()=>toast('Toque em JOGAR novamente para habilitar o áudio'));
+}
+function playCustomEffect(type){try{if(!bridge()||!audioEnabled)return;const list=soundKeys[type]||[];if(!list.length)return;
+ if(type==='hit'&&performance.now()-sfxLast<90)return;sfxLast=performance.now();
+ const pick=list[Math.floor(Math.random()*list.length)];const a=new Audio(Android.importedMediaUrl(type,pick));a.volume=type==='hit'?.18:.55;
+ a.play().catch(()=>{});
+ }catch(e){}
+}
+async function importAudioFiles(files){if(!bridge()){toast('Importação persistente disponível no APK Android.');return}
+ if(music.importing)return;music.importing=true;const fs=Array.from(files);$('importAudio').disabled=true;$('importSoundZip').disabled=true;
+ let success=0;
+ for(const file of fs){try{
+  const started=Android.beginMediaImport(file.name);if(started!=='OK')throw Error(started);
+  for(let off=0;off<file.size;off+=65536){
+   const bytes=new Uint8Array(await file.slice(off,Math.min(file.size,off+65536)).arrayBuffer());
+   let binary='';for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
+   const status=Android.appendMediaImport(btoa(binary));if(status!=='OK')throw Error(status);
+   if(off%(65536*30)===0){$('musicList').textContent=`Importando ${file.name} (${Math.round(off/file.size*100)}%)`;await new Promise(r=>setTimeout(r,0))}
+  }
+  const finished=Android.finishMediaImport();if(!finished.startsWith('OK'))throw Error(finished);
+  success++;
+ }catch(e){try{Android.cancelMediaImport()}catch(_){}toast('Falha em '+file.name+': '+e.message);}
+ }
+ music.importing=false;$('importAudio').disabled=false;$('importSoundZip').disabled=false;
+ musicLibrary();toast(`${success} arquivo(s) importado(s) no celular!`);
+}
+$('importAudio').onclick=()=>$('musicFiles').click();
+$('importSoundZip').onclick=()=>$('soundZipFile').click();
+$('musicFiles').addEventListener('change',e=>{importAudioFiles(e.target.files);e.target.value=''})
+$('soundZipFile').addEventListener('change',e=>{importAudioFiles(e.target.files);e.target.value=''})
+$('musicMode').addEventListener('change',e=>{music.mode=e.target.value;if(music.mode==='off')stopBattleMusic();else if(fightState==='fight')startBattleMusic()});
+$('musicVolume').addEventListener('input',e=>{music.volume=Number(e.target.value)/100;if(music.element)music.element.volume=music.volume;$('musicVolumeText').textContent=`${e.target.value}%`});
+$('previewMusic').onclick=()=>{if(music.element){stopBattleMusic();toast('Prévia interrompida')}else{if(!music.tracks.length)musicLibrary();if(!music.tracks.length){toast('Importe músicas primeiro');return}music.mode='random';$('musicMode').value='random';startBattleMusic();toast('Tocando prévia da seleção aleatória')}};
+$('stopMusic').onclick=stopBattleMusic;
+musicLibrary();
 
 let recorder=null,recChunks=[],recording=false,recordingActive=false,recordFormat='vertical',recCanvas=null,recCtx=null;
 function toast(msg){let el=$('toast');el.textContent=msg;el.classList.remove('hidden');clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.add('hidden'),3100)}
@@ -57,13 +120,13 @@ function readProject(name){return bridge()?Android.loadProject(name):localStorag
 function delProject(name){bridge()?Android.deleteProject(name):localStorage.removeItem('cm_'+name)}
 function projects(){let names=listProjects();alertModal('Seus chefões',`<p>Projetos salvos neste aparelho. Escolha um para continuar editando.</p><div id="projList"></div>`);const list=$('projList');if(!names.length)list.textContent='Nenhum projeto salvo ainda.';names.forEach(name=>{const row=document.createElement('div');row.className='project';const span=document.createElement('span');span.textContent='★ '+name;const open=document.createElement('button');open.textContent='Abrir';open.onclick=()=>{try{let raw=readProject(name);if(!raw)throw new Error('Não encontrado');let obj=JSON.parse(raw);Object.assign(d,clone(defaults),obj);if((obj.version||1)<3 && d.bossHP<200){d.bossHP=Math.max(240,Math.round(d.bossHP*6))}if((obj.version||1)<2){const sx=W/960,sy=H/540;d.bossX*=sx;d.bossY*=sy;d.bossW*=sx;d.bossH*=sy;d.platforms=d.platforms.map(p=>({x:p.x*sx,y:p.y*sy,w:p.w*sx,h:p.h*sy}));}loadImage(d.bgData,'bg');loadImage(d.bossData,'boss');writeInspector();closeModal();toast('Projeto carregado!')}catch(e){toast('Erro ao abrir: '+e.message)}};const del=document.createElement('button');del.textContent='✕';del.onclick=()=>{delProject(name);projects()};row.append(span,open,del);list.append(row)})}
 $('bLoad').onclick=projects;
-$('bHelp').onclick=()=>alertModal('Como jogar — v1.3',`<p>Crie chefes com imagens da galeria e ajuste plataformas e hitbox. Agora existe uma <b>entrada cinematográfica</b>, batalha por fases e tela de resultados.</p><p><b>Rosa = parry:</b> pule e pressione PULAR novamente perto de uma estrela rosa enquanto estiver no ar. Isso destrói o projétil, dá impulso, pontua e pode recuperar vida ao juntar 3 parries.</p><p><b>Mira:</b> arraste o círculo direito para atirar nas oito direções. DASH desvia. Chefões duram muito mais e podem usar até 18 padrões.</p><p>Use o gravador do Android para vídeo MP4 com áudio: a captura WebM do canvas pode não incluir os sons no WebView.</p>`);
-function resetGame(){player={x:62,y:FLOOR_Y-PLAYER_H,w:PLAYER_W,h:PLAYER_H,vx:0,vy:0,facing:1,grounded:false,hp:3,inv:0,dash:0,dashCooldown:0,shootCooldown:0};enemyBullets=[];myBullets=[];particles=[];bossLife=d.bossHP;attackTimers=[];attackClock=2.3;lastPattern=-1;attackCounter=0;patternName='';totalTime=0;simTime=0;shotsHit=0;bulletsFired=0;parries=0;hitsTaken=0;fightPhase=1;fightState='intro';stateClock=0;warningTime=0;warned=false;shake=0;parryWindow=0;parryAnim=0;parryGlow=0;phaseBanner=0;wonLast=false;gameOver=false;introVoicePlayed=false;readyVoicePlayed=false;$('gameOverlay').classList.add('hidden');syncShootAudio()}
+$('bHelp').onclick=()=>alertModal('Como jogar — v1.4',`<p>Crie chefes com imagens da galeria e ajuste plataformas e hitbox. Agora existe uma <b>entrada cinematográfica</b>, batalha por fases e tela de resultados.</p><p><b>Rosa = parry:</b> toque no botão rosa PARRY perto de uma estrela rosa (também funciona com PULAR no ar). Isso destrói o projétil, dá impulso, pontua e pode recuperar vida ao juntar 3 parries.</p><p><b>Mira:</b> arraste o círculo direito para atirar nas oito direções. DASH desvia. Chefões duram muito mais e podem usar até 18 padrões.</p><p>Use o gravador do Android para vídeo MP4 com áudio: a captura WebM do canvas pode não incluir os sons no WebView.</p>`);
+function resetGame(){stopBattleMusic();player={x:62,y:FLOOR_Y-PLAYER_H,w:PLAYER_W,h:PLAYER_H,vx:0,vy:0,facing:1,grounded:true,hp:3,inv:0,dash:0,dashCooldown:0,shootCooldown:0};jumpBuffer=0;coyote=0;parryCooldown=0;enemyBullets=[];myBullets=[];particles=[];bossLife=d.bossHP;attackTimers=[];attackClock=2.3;lastPattern=-1;attackCounter=0;patternName='';totalTime=0;simTime=0;shotsHit=0;bulletsFired=0;parries=0;hitsTaken=0;fightPhase=1;fightState='intro';stateClock=0;warningTime=0;warned=false;shake=0;parryWindow=0;parryAnim=0;parryGlow=0;phaseBanner=0;wonLast=false;gameOver=false;introVoicePlayed=false;readyVoicePlayed=false;$('gameOverlay').classList.add('hidden');syncShootAudio()}
 function startGame(){if(playing)return;resetGame();playing=true;editing=false;document.body.classList.add('playing');$('playHUD').classList.remove('hidden');$('touchUI').classList.remove('hidden');$('modeTag').textContent='COMBATE';$('modeTag').style.background='#a9e7bf';$('status').textContent=d.bossName;$('bPlay').textContent='↻ REINICIAR';$('bPlay').onclick=()=>{resetGame();clearInput();ensureSound()};clearInput();ensureSound();}
 function grade(){let score=(player.hp>0?player.hp*20:0)+parries*10+Math.min(30,shotsHit/Math.max(1,bulletsFired)*30)+Math.max(0,30-totalTime*.3);return score>=100?'S':score>=84?'A':score>=68?'B':score>=50?'C':'D'}
 function showResults(){fightState='results';rank=grade();syncShootAudio();const survived=wonLast;const head=survived?'VITÓRIA!':'TENTE OUTRA VEZ';$('endTitle').textContent=head;$('endText').textContent=survived?'O chefão caiu. Eis o seu resultado:':'A luta ainda não acabou!';const item=(label,value)=>`<div><span>${label}</span><strong>${value}</strong></div>`;$('resultMetrics').innerHTML=item('NOTA',`<em>${rank}</em>`)+item('TEMPO',`${totalTime.toFixed(1)}s`)+item('ACERTOS',shotsHit)+item('PARRIES',parries)+item('DANO SOFRIDO',hitsTaken)+item('VIDAS RESTANTES',player.hp);$('gameOverlay').classList.remove('hidden')}
-function endGame(won){if(gameOver)return;gameOver=true;wonLast=won;fightState=won?'knockout':'defeat';stateClock=0;shake=won?19:8;stopInput();syncShootAudio();playSound(won?'win':'death');particlesBurst(d.bossX,d.bossY,won?'#ffdf88':'#d0e8fb',50);if(recording)toast('Continue gravando: a tela de resultados vai aparecer!')}
-function stopGame(){playing=false;editing=true;fightState='idle';gameOver=false;stopInput();syncShootAudio();document.body.classList.remove('playing');$('playHUD').classList.add('hidden');$('touchUI').classList.add('hidden');$('gameOverlay').classList.add('hidden');$('modeTag').textContent='MODO EDIÇÃO';$('modeTag').style.background='#edca83';$('status').textContent='Configure seu cenário e personalize os ataques';$('bPlay').textContent='▶ JOGAR';$('bPlay').onclick=startGame;}
+function endGame(won){if(gameOver)return;stopBattleMusic(true);gameOver=true;wonLast=won;fightState=won?'knockout':'defeat';stateClock=0;shake=won?19:8;stopInput();syncShootAudio();playSound(won?'win':'death');particlesBurst(d.bossX,d.bossY,won?'#ffdf88':'#d0e8fb',50);if(recording)toast('Continue gravando: a tela de resultados vai aparecer!')}
+function stopGame(){stopBattleMusic();playing=false;editing=true;fightState='idle';gameOver=false;stopInput();syncShootAudio();document.body.classList.remove('playing');$('playHUD').classList.add('hidden');$('touchUI').classList.add('hidden');$('gameOverlay').classList.add('hidden');$('modeTag').textContent='MODO EDIÇÃO';$('modeTag').style.background='#edca83';$('status').textContent='Configure seu cenário e personalize os ataques';$('bPlay').textContent='▶ JOGAR';$('bPlay').onclick=startGame;}
 $('bPlay').onclick=startGame;$('bEdit').onclick=stopGame;$('again').onclick=()=>{resetGame();playing=true;clearInput();ensureSound()};$('exitGame').onclick=stopGame;
 function clearInput(){for(const k in input)input[k]=false;aim.active=false;aimShoot=false;aimOwner=null;syncAimUI();syncShootAudio()}
 function stopInput(){clearInput()}
@@ -72,7 +135,7 @@ addEventListener('keydown',e=>{if(keys[e.code]){e.preventDefault();if(keys[e.cod
 // Right thumb: freely select any of 8 firing directions. Drag towards the rim to lock the angle.
 const aimPad=$('aimPad'),aimKnob=$('aimKnob'),aimLabel=$('aimLabel');
 function syncAimUI(){if(!aimPad)return;aimKnob.style.transform=`translate(calc(-50% + ${aim.active?aim.x*37:0}px),calc(-50% + ${aim.active?aim.y*37:0}px))`;aimPad.classList.toggle('aiming',aim.active);if(aimLabel)aimLabel.textContent=aim.active?'MIRANDO + ATIRANDO':'MIRA • 8 DIREÇÕES';}
-function updateAim(e){const r=aimPad.getBoundingClientRect();let dx=e.clientX-r.left-r.width/2,dy=e.clientY-r.top-r.height/2;if(Math.hypot(dx,dy)<9){aim.active=false;aimShoot=false;syncAimUI();return}let oct=Math.round(Math.atan2(dy,dx)/(Math.PI/4)),a=oct*Math.PI/4;aim.x=Math.round(Math.cos(a)*1000)/1000;aim.y=Math.round(Math.sin(a)*1000)/1000;aim.active=true;aimShoot=true;if(Math.abs(aim.x)>.2)player.facing=Math.sign(aim.x);syncAimUI();}
+function updateAim(e){const r=aimPad.getBoundingClientRect();let dx=e.clientX-r.left-r.width/2,dy=e.clientY-r.top-r.height/2;if(Math.hypot(dx,dy)<6){aim.active=false;aimShoot=false;syncAimUI();return}let oct=Math.round(Math.atan2(dy,dx)/(Math.PI/4)),a=oct*Math.PI/4;aim.x=Math.round(Math.cos(a)*1000)/1000;aim.y=Math.round(Math.sin(a)*1000)/1000;aim.active=true;aimShoot=true;if(Math.abs(aim.x)>.2)player.facing=Math.sign(aim.x);syncAimUI();}
 aimPad.addEventListener('pointerdown',e=>{e.preventDefault();ensureSound();aimOwner=e.pointerId;aimPad.setPointerCapture(e.pointerId);updateAim(e)});
 aimPad.addEventListener('pointermove',e=>{if(aimOwner===e.pointerId)updateAim(e)});
 for(const name of ['pointerup','pointercancel','lostpointercapture'])aimPad.addEventListener(name,e=>{if(e.pointerId!==aimOwner)return;aimOwner=null;aimShoot=false;aim.active=false;syncAimUI()});
@@ -80,13 +143,31 @@ addEventListener('keydown',e=>{const compass={Numpad8:[0,-1],Numpad9:[.707,-.707
 addEventListener('keyup',e=>{if(['KeyW','KeyS','KeyQ','KeyE'].includes(e.code)||e.code.startsWith('Numpad')){aim.active=false;syncAimUI()}});
 syncAimUI();
 for(const [id,key] of [['moveLeft','left'],['moveRight','right'],['btnJump','jump'],['btnShoot','shoot'],['btnDash','dash']]){let b=$(id);b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);if(key==='jump'&&!input.jump)jumpPressed();input[key]=true;ensureSound()});for(let k of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(k,e=>{e.preventDefault();input[key]=false})}
+$('btnParry').addEventListener('pointerdown',e=>{e.preventDefault();$('btnParry').setPointerCapture(e.pointerId);ensureSound();parryPressed()});
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const intersects=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
 function boxBoss(){return{x:d.bossX-d.bossW/2,y:d.bossY-d.bossH/2,w:d.bossW,h:d.bossH}}
 function sound(f=280,dur=.08,type='square'){try{if(!soundCtx)return;let osc=soundCtx.createOscillator(),g=soundCtx.createGain();osc.type=type;osc.frequency.setValueAtTime(f,soundCtx.currentTime);osc.frequency.exponentialRampToValueAtTime(Math.max(40,f*.62),soundCtx.currentTime+dur);g.gain.setValueAtTime(.07,soundCtx.currentTime);g.gain.exponentialRampToValueAtTime(.001,soundCtx.currentTime+dur);osc.connect(g);g.connect(soundCtx.destination);osc.start();osc.stop(soundCtx.currentTime+dur)}catch(e){}}
 function ensureSound(){try{if(!soundCtx)soundCtx=new (window.AudioContext||window.webkitAudioContext)();soundCtx.resume()}catch(e){}}
-function jumpPressed(){if(fightState==='fight'&&!player.grounded){parryWindow=.31;parryAnim=.29;tryParry()}}
-function tryParry(){if(fightState!=='fight'||parryWindow<=0)return false;for(let i=enemyBullets.length-1;i>=0;i--){const b=enemyBullets[i];if(!b.pink)continue;const cx=player.x+player.w*.5,cy=player.y+player.h*.5;if(Math.hypot(cx-b.x,cy-b.y)<Math.max(78,32+b.r)){enemyBullets.splice(i,1);parries++;parryGlow=.65;parryAnim=.43;parryWindow=0;player.vy=-485;player.inv=Math.max(player.inv,.33);if(parries%3===0)player.hp=Math.min(3,player.hp+1);shake=7;particlesBurst(b.x,b.y,'#ff7fdb',27);sound(940,.17,'sine');return true}}return false}
+function jumpPressed(){if(fightState!=='fight')return;jumpBuffer=.16;
+ // Pulo normal continua sendo o comando principal; perto de um objeto rosa, também permite parry no ar.
+ if(!player.grounded&&enemyBullets.some(b=>b.pink&&Math.hypot(player.x+player.w/2-b.x,player.y+player.h/2-b.y)<110))parryPressed();}
+function parryPressed(){if(fightState!=='fight'||parryCooldown>0)return;
+ parryWindow=.48;parryAnim=.46;parryCooldown=.22;
+ if(!player.grounded)player.vy=Math.min(player.vy,-160);
+ tryParry();}
+function tryParry(){if(fightState!=='fight'||parryWindow<=0)return false;
+ const cx=player.x+player.w*.5,cy=player.y+player.h*.5;
+ let best=-1,dist=Infinity;
+ for(let i=0;i<enemyBullets.length;i++){const b=enemyBullets[i];if(!b.pink)continue;
+  const delta=Math.hypot(cx-b.x,cy-b.y);
+  if(delta<Math.max(102,65+b.r)&&delta<dist){best=i;dist=delta}
+ }
+ if(best<0)return false;
+ const b=enemyBullets.splice(best,1)[0];parries++;parryGlow=.72;parryAnim=.45;parryWindow=0;
+ player.vy=-390;player.inv=Math.max(player.inv,.38);if(parries%3===0)player.hp=Math.min(3,player.hp+1);
+ shake=5;particlesBurst(b.x,b.y,'#ff7fdb',24);playCustomEffect('parry');sound(840,.11,'sine');return true;
+}
 function hurt(){if(player.inv>0||gameOver||fightState!=='fight')return;player.hp--;hitsTaken++;player.inv=1.20;shake=9;particlesBurst(player.x+player.w/2,player.y+player.h/2,'#ffcb85',13);playSound('hurt');if(player.hp<=0)endGame(false)}
 function particlesBurst(x,y,color,n){for(let i=0;i<n;i++){let ang=Math.random()*Math.PI*2,v=70+Math.random()*200;particles.push({x,y,vx:Math.cos(ang)*v,vy:Math.sin(ang)*v,life:.4+Math.random()*.4,c:color})}}
 function emit(x,y,vx,vy,kind='aim',extra={}){if(enemyBullets.length>140)return;const pink=kind==='parry'||((attackCounter*17+enemyBullets.length*3)%13===0);enemyBullets.push({x,y,vx,vy,r:kind==='rain'?10:kind==='ring'?8:kind==='meteor'?18:kind==='laser'?13:kind==='parry'?17:12,life:9,rotation:Math.random()*6.2,kind,baseY:y,phase:Math.random()*6.28,pink,age:0,...extra})}
@@ -118,7 +199,7 @@ function step(dt){if(!playing)return;simTime+=dt;stateClock+=dt;shake=Math.max(0
  if(fightState==='intro'){
   if(stateClock>=.32&&!introVoicePlayed){introVoicePlayed=true;playSound('intro')}
   if(stateClock>=2.25&&!readyVoicePlayed){readyVoicePlayed=true;playSound('ready')}
-  if(stateClock>=4.25){fightState='fight';stateClock=0;attackClock=1.6;clearInput();sound(590,.2,'sawtooth')}
+  if(stateClock>=4.25){fightState='fight';stateClock=0;attackClock=1.6;clearInput();startBattleMusic();sound(590,.2,'sawtooth')}
   return;
  }
  if(fightState==='knockout'||fightState==='defeat'){
@@ -127,15 +208,37 @@ function step(dt){if(!playing)return;simTime+=dt;stateClock+=dt;shake=Math.max(0
   return;
  }
  if(fightState!=='fight')return;
- totalTime+=dt;player.inv=Math.max(0,player.inv-dt);player.dashCooldown=Math.max(0,player.dashCooldown-dt);player.shootCooldown=Math.max(0,player.shootCooldown-dt);player.dash=Math.max(0,player.dash-dt);parryWindow=Math.max(0,parryWindow-dt);
+ totalTime+=dt;player.inv=Math.max(0,player.inv-dt);player.dashCooldown=Math.max(0,player.dashCooldown-dt);player.shootCooldown=Math.max(0,player.shootCooldown-dt);player.dash=Math.max(0,player.dash-dt);parryWindow=Math.max(0,parryWindow-dt);parryCooldown=Math.max(0,parryCooldown-dt);
  let newPhase=bossLife/d.bossHP<.30?3:bossLife/d.bossHP<.64?2:1;if(newPhase>fightPhase){fightPhase=newPhase;phaseBanner=2.4;attackClock=1.8;enemyBullets=enemyBullets.slice(-18);shake=12;particlesBurst(d.bossX,d.bossY,'#f4c66c',32);sound(310,.4,'sawtooth')}
- const oldY=player.y;const motion=(input.right?1:0)-(input.left?1:0);if(motion&&!aim.active)player.facing=motion;
- if(input.dash&&player.dashCooldown<=0){player.dash=.20;player.dashCooldown=.88;player.vx=player.facing*575;playSound('dash');particlesBurst(player.x,player.y+35,'#d8f9ee',8)}
- if(player.dash<=0){player.vx=motion*220;if(input.jump&&player.grounded){player.vy=-625;player.grounded=false;sound(500,.13,'triangle')}player.vy+=1490*dt}
- player.x=clamp(player.x+player.vx*dt,0,W-player.w);player.y+=player.vy*dt;player.grounded=false;
- if(player.y+player.h>=FLOOR_Y){player.y=FLOOR_Y-player.h;player.vy=0;player.grounded=true}
- for(const p of d.platforms){if(player.vy>=0&&oldY+player.h<=p.y+12&&player.y+player.h>=p.y&&player.x+player.w>p.x+5&&player.x<p.x+p.w-5){player.y=p.y-player.h;player.vy=0;player.grounded=true}}
- syncShootAudio();if((input.shoot||aimShoot)&&player.shootCooldown<=0){player.shootCooldown=.145;let dx=aim.active?aim.x:player.facing,dy=aim.active?aim.y:0;let mag=Math.hypot(dx,dy)||1;dx/=mag;dy/=mag;const x=player.x+player.w*.5+dx*25,y=player.y+player.h*.43+dy*20;myBullets.push({x,y,vx:dx*825,vy:dy*825,life:2.4,ang:Math.atan2(dy,dx)});bulletsFired++}
+ // Física com cruzamento real da plataforma: nunca reposiciona o herói se ele passou por baixo.
+ const oldY=player.y,oldBottom=player.y+player.h;
+ const motion=(input.right?1:0)-(input.left?1:0);if(motion&&!aim.active)player.facing=motion;
+ coyote=player.grounded?.095:Math.max(0,coyote-dt);
+ jumpBuffer=Math.max(0,jumpBuffer-dt);
+ if(input.dash&&player.dashCooldown<=0){player.dash=.14;player.dashCooldown=1;player.vx=player.facing*415;playSound('dash');particlesBurst(player.x,player.y+35,'#d8f9ee',8)}
+ if(player.dash<=0){
+  const desired=motion*190;
+  player.vx+=(desired-player.vx)*Math.min(1,17*dt);
+  if(jumpBuffer>0&&(player.grounded||coyote>0)){player.vy=-550;player.grounded=false;coyote=0;jumpBuffer=0;sound(500,.12,'triangle')}
+  player.vy=Math.min(850,player.vy+1400*dt);
+ }
+ let nextX=clamp(player.x+clamp(player.vx*dt,-15,15),0,W-player.w);
+ let nextY=player.y+clamp(player.vy*dt,-20,20);
+ // O dash também não atravessa a arena; colisões horizontais não movem o jogador verticalmente.
+ player.x=nextX;player.y=nextY;player.grounded=false;
+ if(player.vy>=0){
+  let landing=FLOOR_Y;
+  for(const p of d.platforms){
+   if(!Number.isFinite(p.x)||!Number.isFinite(p.y)||p.w<=0)continue;
+   const crossesTop=oldBottom<=p.y+2 && player.y+player.h>=p.y;
+   const overlapsX=player.x+player.w>p.x+5&&player.x<p.x+p.w-5;
+   if(crossesTop&&overlapsX&&p.y<landing)landing=p.y;
+  }
+  if(player.y+player.h>=landing){player.y=landing-player.h;player.vy=0;player.grounded=true}
+ }
+ player.y=clamp(player.y,-player.h,FLOOR_Y-player.h);
+ if(!Number.isFinite(player.x)||!Number.isFinite(player.y)){player.x=62;player.y=FLOOR_Y-player.h;player.vx=player.vy=0;player.grounded=true} 
+ if(parryWindow>0)tryParry();syncShootAudio();if((input.shoot||aimShoot)&&player.shootCooldown<=0){player.shootCooldown=.145;let dx=aim.active?aim.x:player.facing,dy=aim.active?aim.y:0;let mag=Math.hypot(dx,dy)||1;dx/=mag;dy/=mag;const x=player.x+player.w*.5+dx*25,y=player.y+player.h*.43+dy*20;myBullets.push({x,y,vx:dx*825,vy:dy*825,life:2.4,ang:Math.atan2(dy,dx)});bulletsFired++}
  attackClock-=dt;if(attackClock<.45&&!warned){warned=true;warningTime=.5;patternName='PREPARE-SE!'}warningTime=Math.max(0,warningTime-dt);if(attackClock<=0)chooseAttack();
  for(let i=enemyBullets.length-1;i>=0;i--){const b=enemyBullets[i];b.age+=dt;
   if(b.kind==='homing'&&b.age<2.7){let ang=Math.atan2(player.y+player.h*.5-b.y,player.x+player.w*.5-b.x),old=Math.atan2(b.vy,b.vx),difference=Math.atan2(Math.sin(ang-old),Math.cos(ang-old)),a=old+clamp(difference,-1.1*dt,1.1*dt),speed=Math.hypot(b.vx,b.vy);b.vx=Math.cos(a)*speed;b.vy=Math.sin(a)*speed}
@@ -147,7 +250,7 @@ function step(dt){if(!playing)return;simTime+=dt;stateClock+=dt;shake=Math.max(0
   if(b.pink&&parryWindow>0&&tryParry())continue;
   if(intersects(player,{x:b.x-b.r,y:b.y-b.r,w:b.r*2,h:b.r*2})&&player.dash<=0){if(b.pink&&parryWindow>0){tryParry();continue}enemyBullets.splice(i,1);hurt()}
  }
- const hb=boxBoss();for(let i=myBullets.length-1;i>=0;i--){let b=myBullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;if(b.life<=0||b.x<-40||b.x>W+40||b.y<-40||b.y>H+40){myBullets.splice(i,1);continue}if(intersects({x:b.x-8,y:b.y-8,w:16,h:16},hb)){myBullets.splice(i,1);bossLife--;shotsHit++;if(shotsHit%4===0)particlesBurst(b.x,b.y,'#ffee9f',4);if(bossLife<=0){endGame(true);break}}}
+ const hb=boxBoss();for(let i=myBullets.length-1;i>=0;i--){let b=myBullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;if(b.life<=0||b.x<-40||b.x>W+40||b.y<-40||b.y>H+40){myBullets.splice(i,1);continue}if(intersects({x:b.x-8,y:b.y-8,w:16,h:16},hb)){myBullets.splice(i,1);bossLife--;shotsHit++;if(simTime-lastHitSfx>.125){lastHitSfx=simTime;playCustomEffect('hit')}if(shotsHit%4===0)particlesBurst(b.x,b.y,'#ffee9f',4);if(bossLife<=0){endGame(true);break}}}
  for(let i=particles.length-1;i>=0;i--){let p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=120*dt;p.life-=dt;if(p.life<=0)particles.splice(i,1)}
 }
 function roundRect(c,x,y,w,h,r,fill){c.beginPath();c.roundRect(x,y,w,h,r);if(fill)c.fill();else c.stroke()}
@@ -160,11 +263,11 @@ function drawBoss(){const t=playing||gameOver?simTime:performance.now()/3000;con
 }
 function drawSprite(mode,x,y,width=145,height=163,frameOverride=null,opacity=1){let im=sprites[mode],count=spriteCount[mode];if(!(im&&im.complete&&im.naturalWidth))return;let frame=frameOverride===null?Math.floor(simTime*(mode==='run'?14:11))%count:Math.max(0,Math.min(count-1,frameOverride));ctx.save();ctx.globalAlpha*=opacity;ctx.drawImage(im,frame*128,0,128,144,x,y,width,height);ctx.restore()}
 function drawPlayer(){let mode='idle';if(fightState==='intro')mode='intro';else if(fightState==='defeat')mode='death';else if(parryAnim>0)mode=parryGlow>0?'parryPink':'parry';else if(player.dash>0)mode='dash';else if(input.shoot||aimShoot){if(aim.active&&aim.y<-.3)mode=Math.abs(aim.x)<.3?'shootUp':'shootDiagUp';else if(aim.active&&aim.y>.3)mode=Math.abs(aim.x)<.3?'shootDown':'shootDiagDown';else mode='shoot'}else if(!player.grounded)mode='jump';else if(Math.abs(player.vx)>5)mode='run';
- ctx.save();if(player.inv>0&&Math.floor(player.inv*12)%2===0)ctx.globalAlpha=.48;let direction=player.facing;if(aim.active&&Math.abs(aim.x)>.2)direction=Math.sign(aim.x);const renderW=145,renderH=163;let dx=player.x+(player.w-renderW)/2,dy=player.y+player.h-renderH;
+ ctx.save();if(player.inv>0&&Math.floor(player.inv*12)%2===0)ctx.globalAlpha=.48;let direction=player.facing;if(aim.active&&Math.abs(aim.x)>.2)direction=Math.sign(aim.x);const renderW=110,renderH=130;let dx=player.x+(player.w-renderW)/2,dy=player.y+player.h-renderH;
  if(direction<0){ctx.translate(dx+renderW,0);ctx.scale(-1,1);dx=0}else ctx.translate(dx,0);
  const frame=(fightState==='intro')?Math.min(43,Math.floor(Math.max(0,stateClock-.35)*17)):(fightState==='defeat')?Math.min(15,Math.floor(stateClock*12)):(mode.startsWith('parry'))?Math.min(7,Math.floor((.45-parryAnim)*20)):null;
  const im=sprites[mode];if(im&&im.complete&&im.naturalWidth)drawSprite(mode,dx,dy,renderW,renderH,frame);else{ctx.fillStyle='#f8e7bd';ctx.beginPath();ctx.arc(45,dy+35,30,0,7);ctx.fill();ctx.fillStyle='#e35854';ctx.fillRect(20,dy+70,50,57)}ctx.restore();
- if(fightState==='defeat'&&stateClock>.5){let ghostY=player.y-45-Math.min(230,stateClock*65);drawSprite('ghost',player.x-22,ghostY,110,130,Math.floor(stateClock*13)%24,.82)}
+ if(fightState==='defeat'&&stateClock>.5){let ghostY=player.y-45-Math.min(230,stateClock*65);drawSprite('ghost',player.x-12,ghostY,95,113,Math.floor(stateClock*13)%24,.82)}
 }
 function drawBullets(){for(const b of myBullets){ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.ang||0);ctx.shadowColor='#9cfeff';ctx.shadowBlur=9;ctx.fillStyle='#baffff';ctx.beginPath();ctx.ellipse(0,0,15,6,0,0,Math.PI*2);ctx.fill();ctx.restore()}ctx.shadowBlur=0;
  const colors={aim:'#ab4976',fan:'#f5a345',rain:'#51a5b6',wave:'#8a6bca',spiral:'#d6539b',ring:'#ecbe77',zigzag:'#74db9f',homing:'#8af6c0',meteor:'#feae59',laser:'#ef7589',bounce:'#e5d58a',split:'#ba9bea',columns:'#8ee6f1',parry:'#ff7fcf'};

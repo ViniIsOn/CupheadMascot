@@ -79,3 +79,18 @@ body.playing #touchUI .actPad button:last-child{min-width:66px;min-height:66px}
 #resultMetrics div{display:flex;justify-content:space-between;border-bottom:1px dashed #ab8c73}#resultMetrics strong{color:#993c5f}#resultMetrics em{font-size:32px;font-style:normal}
 #gameOverlay .resultActions{display:flex;gap:7px;flex-wrap:wrap;justify-content:center}#gameOverlay button{font-size:13px}#gameOverlay.hidden{pointer-events:none}
 #touchUI #btnJump{font-size:9px;line-height:1.15;white-space:normal;max-width:64px;}
+
+/* v1.4: botão rosa de parry separado, jogabilidade vertical confortável */
+#touchUI #btnParry{background:linear-gradient(145deg,#ec64b3,#9c336a);color:#fff5fb;border-color:#ffdaed;box-shadow:0 0 12px #f95daa7c;font-weight:1000;font-size:10px;min-width:58px;min-height:58px}
+#touchUI #btnParry:active{background:#ffbadb;color:#42152f}
+body.playing #touchUI .actPad{display:grid;grid-template-columns:repeat(2,minmax(43px,1fr));gap:5px;justify-content:end;max-width:132px}
+body.playing #touchUI .actPad button{min-width:0;min-height:49px;width:100%;font-size:10px}
+body.playing #touchUI .actPad #btnParry{min-height:54px}
+body.playing #touchUI .actPad #btnShoot{background:#974e59d9}
+body.playing #touchUI #aimPad{width:106px;height:106px}
+body.playing #touchUI #aimKnob{height:35px;width:35px}
+body.playing #touchUI .actionArea{gap:6px}
+body.playing #touchUI .movePad{gap:5px}
+body.playing #touchUI .movePad button{width:52px;min-width:52px;min-height:56px}
+@media(max-width:380px){body.playing #touchUI{padding-left:6px;padding-right:6px}body.playing #touchUI .movePad button{width:45px;min-width:45px;min-height:50px}body.playing #touchUI #aimPad{width:94px;height:94px}body.playing #touchUI .actPad{max-width:116px}}
+#musicList{background:#10182d;padding:7px;border-radius:7px;word-break:break-word}

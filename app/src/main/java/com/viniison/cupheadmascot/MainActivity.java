@@ -19,6 +19,12 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.ValueCallback;
 import android.webkit.WebViewClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.MimeTypeMap;
+import java.net.URLDecoder;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipEntry;
 import android.webkit.ConsoleMessage;
 import android.widget.Toast;
 
@@ -40,6 +46,8 @@ public final class MainActivity extends Activity {
     private WebView browser;
     private ValueCallback<Uri[]> fileCallback;
     private File pendingVideo;
+    private File stagedMedia;
+    private OutputStream mediaWrite;
     private OutputStream videoStream;
     private String pendingVideoName;
     private String pendingVideoMime;
@@ -61,7 +69,23 @@ public final class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setDefaultTextEncodingName("utf-8");
-        browser.setWebViewClient(new WebViewClient());
+        browser.setWebViewClient(new WebViewClient(){
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request){
+                Uri uri=request.getUrl();
+                if(!"cm-media.invalid".equals(uri.getHost()))return super.shouldInterceptRequest(view,request);
+                try{
+                    String type=uri.getPathSegments().get(0);
+                    String file=uri.getLastPathSegment();
+                    if(!(type.equals("music")||type.equals("hit")||type.equals("parry")))return null;
+                    File f=new File(new File(getFilesDir(),"user_media/"+type),safeMediaName(file));
+                    if(!f.isFile()||!f.getCanonicalPath().startsWith(new File(getFilesDir(),"user_media/"+type).getCanonicalPath()+File.separator))return null;
+                    String ext=file.substring(file.lastIndexOf('.')+1).toLowerCase(java.util.Locale.US);
+                    String mime=ext.equals("mp3")?"audio/mpeg":ext.equals("wav")?"audio/wav":"audio/ogg";
+                    java.util.Map<String,String> headers=new java.util.HashMap<>();headers.put("Access-Control-Allow-Origin","*");headers.put("Accept-Ranges","bytes");
+                    return new WebResourceResponse(mime,null,200,"OK",headers,new FileInputStream(f));
+                }catch(Exception e){android.util.Log.w("CupheadMascot","Audio local indisponível: "+e.getMessage());return null;}
+            }
+        });
         browser.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if(fileCallback!=null) fileCallback.onReceiveValue(null);
@@ -94,13 +118,87 @@ public final class MainActivity extends Activity {
         } else super.onBackPressed();
     }
     @Override protected void onDestroy(){
-        synchronized(this){try{if(videoStream!=null)videoStream.close();}catch(Exception ignored){}videoStream=null;}
+        synchronized(this){try{if(videoStream!=null)videoStream.close();}catch(Exception ignored){}videoStream=null;
+          try{if(mediaWrite!=null)mediaWrite.close();}catch(Exception ignored){}mediaWrite=null;}
         if(browser!=null){browser.removeJavascriptInterface("Android");browser.destroy();browser=null;}
         super.onDestroy();
     }
     private String projectName(String s){return s.replaceAll("[^\\p{L}\\p{N}_ -]", "_").trim().replaceAll(" +"," ");}
     private File projectDir(){File f=new File(getFilesDir(),"projects");if(!f.exists())f.mkdirs();return f;}
+    private String safeMediaName(String name){
+        String n=new File(name).getName().replaceAll("[^a-zA-Z0-9_ .()\\-\\p{L}]","_");
+        if(n.length()>105)n=n.substring(n.length()-105);
+        return n.isEmpty()?"audio.mp3":n;
+    }
+    private File mediaDir(String type){File f=new File(getFilesDir(),"user_media/"+type);if(!f.exists())f.mkdirs();return f;}
+    private boolean addImportedMedia(InputStream input,String filename,long maxBytes)throws Exception{
+        String name=safeMediaName(filename),lower=name.toLowerCase(java.util.Locale.US);
+        String type;
+        if(lower.matches(".*\\.(mp3|ogg)$"))type="music";
+        else if(lower.endsWith(".wav")&&lower.contains("parry"))type="parry";
+        else if(lower.endsWith(".wav")&&lower.contains("hit"))type="hit";
+        else return false;
+        File target=new File(mediaDir(type),name);
+        long total=0;
+        try(OutputStream out=new FileOutputStream(target)){
+            byte[] buf=new byte[32768];int n;
+            while((n=input.read(buf))!=-1){total+=n;if(total>maxBytes)throw new Exception("Arquivo maior que o limite");out.write(buf,0,n);}
+        }catch(Exception e){target.delete();throw e;}
+        return true;
+    }
     public final class StorageBridge {
+        @JavascriptInterface public synchronized String beginMediaImport(String name){
+            try{if(mediaWrite!=null)mediaWrite.close();
+                stagedMedia=new File(getCacheDir(),"imported_"+System.nanoTime()+"_"+safeMediaName(name));
+                mediaWrite=new FileOutputStream(stagedMedia);return "OK";
+            }catch(Exception e){return e.getMessage();}
+        }
+        @JavascriptInterface public synchronized String appendMediaImport(String data){
+            try{if(mediaWrite==null||stagedMedia==null)return "Inicie a importação";
+                if(stagedMedia.length()>95000000)return "Limite de 95 MB por arquivo";
+                mediaWrite.write(android.util.Base64.decode(data,android.util.Base64.DEFAULT));return "OK";
+            }catch(Exception e){return e.getMessage();}
+        }
+        @JavascriptInterface public synchronized String finishMediaImport(){
+            try{
+                if(stagedMedia==null||mediaWrite==null)return "Nenhuma importação";
+                mediaWrite.close();mediaWrite=null;
+                String name=stagedMedia.getName(),lower=name.toLowerCase(java.util.Locale.US);
+                int count=0;
+                if(lower.endsWith(".zip")){
+                    try(ZipInputStream zi=new ZipInputStream(new FileInputStream(stagedMedia))){
+                        ZipEntry entry;
+                        while((entry=zi.getNextEntry())!=null){
+                            if(!entry.isDirectory()&&count<80&&addImportedMedia(zi,entry.getName(),18000000))count++;
+                            zi.closeEntry();
+                        }
+                    }
+                }else{
+                    try(InputStream fi=new FileInputStream(stagedMedia)){if(addImportedMedia(fi,name.replaceFirst("^imported_[0-9]+_",""),18000000))count++;}
+                }
+                stagedMedia.delete();stagedMedia=null;
+                return count>0?"OK: "+count+" arquivo(s)":"Nenhuma faixa ou efeito suportado encontrado";
+            }catch(Exception e){if(stagedMedia!=null)stagedMedia.delete();stagedMedia=null;return e.getMessage();}
+        }
+        @JavascriptInterface public synchronized String cancelMediaImport(){
+            try{if(mediaWrite!=null)mediaWrite.close();}catch(Exception ignored){}
+            mediaWrite=null;if(stagedMedia!=null)stagedMedia.delete();stagedMedia=null;return "OK";
+        }
+        @JavascriptInterface public String listImportedMedia(){
+            JSONArray items=new JSONArray();
+            for(String type:new String[]{"music","hit","parry"}){
+                File[] fs=mediaDir(type).listFiles();if(fs==null)continue;
+                Arrays.sort(fs, (a,b)->a.getName().compareToIgnoreCase(b.getName()));
+                for(File f:fs){if(!f.isFile())continue;JSONObject obj=new JSONObject();
+                    try{obj.put("type",type);obj.put("name",f.getName());obj.put("size",f.length());items.put(obj);}catch(Exception ignored){}
+                }
+            }
+            return items.toString();
+        }
+        @JavascriptInterface public String importedMediaUrl(String type,String name){
+            if(!(type.equals("music")||type.equals("hit")||type.equals("parry")))return "";
+            return "https://cm-media.invalid/"+type+"/"+Uri.encode(safeMediaName(name));
+        }
         @JavascriptInterface public String saveProject(String json){
             try{JSONObject obj=new JSONObject(json);String n=projectName(obj.optString("bossName","Chefao"));if(n.length()==0)n="Chefao";if(n.length()>35)n=n.substring(0,35);File out=new File(projectDir(),n+".json");try(FileOutputStream stream=new FileOutputStream(out)){stream.write(json.getBytes(StandardCharsets.UTF_8));}return "OK";}
             catch(Exception e){return e.getMessage();}
