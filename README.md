@@ -22,5 +22,5 @@ Editor de chefões para Android em 9:16 com controles touchscreen, imagens de fu
 ## Notas
 
 - A gravação WebM feita pelo canvas do Android pode não conter áudio do jogo. Para postar MP4 no Kwai com áudio use o gravador de tela do Android.
-- Esta edição usa o ID `com.viniison.cupheadmascot.vertical.v13` e instala **ao lado da v1.2.2**, evitando conflitos de assinatura dos APKs debug do GitHub Actions. A v1.3 não importa automaticamente os projetos da v1.2.2; mantenha a anterior instalada.
+- O ID Android `com.viniison.cupheadmascot.vertical.v12` está preservado para atualizar a versão 1.2.2 sem apagar dados. Evite desinstalar a versão anterior.
 - Sprites e áudios fornecidos pelo usuário são usados neste protótipo para fins pessoais. Distribuição pública depende da licença/autorização do titular dos direitos.
