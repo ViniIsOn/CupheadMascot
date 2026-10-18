@@ -1,3 +1,22 @@
+# CupheadMascot v1.1 Vertical — Kwai Edition
+
+## Atualização v1.1
+- **Portrait 9:16 real**: jogo em canvas 540×960, sem letterbox na gravação.
+- Interface de editor em duas abas, chefões, ataques, plataformas, importação de imagens e hitboxes no celular em pé.
+- Controles de toque na parte inferior e gravação acessível durante a luta.
+- Ícone Android incluído em cinco resoluções (`mipmap-*`), desenhado programaticamente a partir de um sprite enviado pelo usuário; nenhuma imagem foi gerada por IA.
+- AndroidManifest e MainActivity em orientação retrato.
+- Pacote Android separado (`com.viniison.cupheadmascot.vertical`), para poder instalar ao lado da versão anterior sem apagar os projetos antigos; os projetos não são transferidos automaticamente entre apps. O formato de arquivos antigos é conversível se importado no armazenamento do novo app.
+
+## APK
+GitHub Actions > Android APK > último build bem-sucedido > artefato `CupheadMascot-APK` > `app-debug.apk`. A nova versão usa um pacote separado e instala ao lado da versão antiga para evitar conflitos de assinatura no GitHub Actions. A remoção da versão antiga pode apagar os projetos dela; mantenha-a instalada até ter seus projetos em segurança.
+
+## Gravação
+WebView pode ou não suportar MediaRecorder/captureStream; quando suportado, o vídeo é capturado **nativamente em 540×960** WebM, sem enquadramento horizontal. Para MP4 compatível com Kwai, use o gravador de tela do Android.
+
+## Créditos e direitos
+Personagens, nome e sprites de Cuphead pertencem a seus criadores/titulares. Esta versão é protótipo pessoal; para distribuir comercialmente, é necessário substituir materiais protegidos por recursos licenciados/originais.
+
 # CupheadMascot — Boss Studio para Android
 
 Protótipo Android off-line (Java + WebView + Canvas) de um editor de chefes inspirado nos jogos de plataforma clássicos. Código no namespace `com.viniison.cupheadmascot`.
