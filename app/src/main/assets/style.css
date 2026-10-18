@@ -69,3 +69,13 @@ body.playing #touchUI .movePad button{min-width:59px;min-height:61px}
 body.playing #touchUI .actPad button{min-width:55px;min-height:55px}
 body.playing #touchUI .actPad button:last-child{min-width:66px;min-height:66px}
 @media(max-width:370px){#touchUI #aimPad{width:116px;height:116px}#touchUI .aimRose{font-size:14px;line-height:28px}body.playing #touchUI .movePad button{min-width:48px;min-height:53px}body.playing #touchUI .actPad button{min-width:46px;min-height:53px}body.playing #touchUI .actPad button:last-child{min-width:58px;min-height:60px}}
+
+/* v1.3 — cinematic results and touch controls */
+#gameOverlay{z-index:8;justify-content:center;gap:12px;padding:25px;background:linear-gradient(165deg,#100d25ec,#33223de9);border:2px solid #eccb88;pointer-events:auto;overflow-y:auto;}
+#gameOverlay .resultStamp{letter-spacing:4px;color:#f8c982;font:900 12px Georgia,serif;transform:rotate(-3deg)}
+#gameOverlay h1{font-family:Georgia,serif;font-size:clamp(38px,11vw,65px);transform:rotate(-3deg);color:#fff0d0;text-shadow:4px 5px 0 #702f4f,-2px -2px 0 #bb7d61;}
+#gameOverlay #endText{font:700 15px Georgia,serif;margin:0}
+#resultMetrics{width:min(340px,92%);border:2px dotted #e9c28c;background:#f6e7c9;color:#2d2d42;border-radius:5px;padding:14px 16px;text-align:left;transform:rotate(1deg);font:800 15px Georgia,serif;line-height:2.0;box-shadow:7px 7px 0 #121426a5}
+#resultMetrics div{display:flex;justify-content:space-between;border-bottom:1px dashed #ab8c73}#resultMetrics strong{color:#993c5f}#resultMetrics em{font-size:32px;font-style:normal}
+#gameOverlay .resultActions{display:flex;gap:7px;flex-wrap:wrap;justify-content:center}#gameOverlay button{font-size:13px}#gameOverlay.hidden{pointer-events:none}
+#touchUI #btnJump{font-size:9px;line-height:1.15;white-space:normal;max-width:64px;}
