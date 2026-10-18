@@ -7,7 +7,7 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.viniison.cupheadmascot.vertical.v12'
+        applicationId 'com.viniison.cupheadmascot.vertical.v13'
         minSdk 29
         targetSdk 35
         versionCode 6
