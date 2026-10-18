@@ -1,7 +1,7 @@
-# CupheadMascot v1.2 — Mira Livre / Kwai
+# CupheadMascot v1.2.1 — Mira Livre / Kwai
 
 ## Correções pedidas
-- Personagem visualmente ~1,5x maior (render 145×163 no canvas 540×960), hitbox de 80×106, pés alinhados às plataformas.
+- Personagem visualmente maior, com sprite recortado e ampliado (render 145×163 no canvas 540×960), hitbox de 80×106, pés alinhados às plataformas.
 - Sprite com tiro para cima, baixo e diagonal, retirado do ZIP enviado. Espelhamento para a esquerda.
 - Joystick direito em 8 direções: mantenha o dedo no joystick para mirar **e disparar**; o botão ATIRAR é independente e continua usando a última direção.
 - Boss alterna ataques automaticamente por padrão, sem repetir o tipo imediatamente. Ao carregar projeto antigo com apenas 1 ataque, o modo SURPRESA adiciona variações temporárias sem alterar os ataques salvos.
