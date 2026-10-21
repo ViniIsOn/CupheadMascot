@@ -31,6 +31,8 @@ import android.widget.Toast;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
+import android.provider.OpenableColumns;
+import android.database.Cursor;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileInputStream;
@@ -43,6 +45,9 @@ import java.util.ArrayList;
 
 public final class MainActivity extends Activity {
     private static final int FILE_PICKER_REQUEST = 2003;
+    private static final int FAST_AUDIO_REQUEST = 2004;
+    private final java.util.concurrent.ExecutorService mediaExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private volatile boolean fastImportActive = false;
     private WebView browser;
     private ValueCallback<Uri[]> fileCallback;
     private File pendingVideo;
@@ -110,6 +115,14 @@ public final class MainActivity extends Activity {
         super.onActivityResult(request,result,data);
         if(request==FILE_PICKER_REQUEST){
             if(fileCallback!=null){fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result,data));fileCallback=null;}
+        }else if(request==FAST_AUDIO_REQUEST){
+            if(result!=RESULT_OK || data==null){notifyAudioProgress("cancel", "Importação cancelada", 0, 0);return;}
+            ArrayList<Uri> selected=new ArrayList<>();
+            if(data.getClipData()!=null){for(int i=0;i<data.getClipData().getItemCount();i++)selected.add(data.getClipData().getItemAt(i).getUri());}
+            else if(data.getData()!=null) selected.add(data.getData());
+            if(selected.isEmpty()){notifyAudioProgress("cancel", "Nenhum arquivo escolhido", 0, 0);return;}
+            fastImportActive=true;
+            mediaExecutor.execute(()->processAudioSelection(selected));
         }
     }
     @Override public void onBackPressed(){
@@ -120,6 +133,7 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy(){
         synchronized(this){try{if(videoStream!=null)videoStream.close();}catch(Exception ignored){}videoStream=null;
           try{if(mediaWrite!=null)mediaWrite.close();}catch(Exception ignored){}mediaWrite=null;}
+        mediaExecutor.shutdownNow();
         if(browser!=null){browser.removeJavascriptInterface("Android");browser.destroy();browser=null;}
         super.onDestroy();
     }
@@ -134,19 +148,84 @@ public final class MainActivity extends Activity {
     private boolean addImportedMedia(InputStream input,String filename,long maxBytes)throws Exception{
         String name=safeMediaName(filename),lower=name.toLowerCase(java.util.Locale.US);
         String type;
-        if(lower.matches(".*\\.(mp3|ogg)$"))type="music";
-        else if(lower.endsWith(".wav")&&lower.contains("parry"))type="parry";
+        if(lower.endsWith(".wav")&&lower.contains("parry"))type="parry";
         else if(lower.endsWith(".wav")&&lower.contains("hit"))type="hit";
+        else if(lower.matches(".*\\.(mp3|ogg|wav)$"))type="music";
         else return false;
-        File target=new File(mediaDir(type),name);
+        File parent=mediaDir(type),target=new File(parent,name);
+        File temp=File.createTempFile("audio_", ".tmp",parent);
         long total=0;
-        try(OutputStream out=new FileOutputStream(target)){
-            byte[] buf=new byte[32768];int n;
-            while((n=input.read(buf))!=-1){total+=n;if(total>maxBytes)throw new Exception("Arquivo maior que o limite");out.write(buf,0,n);}
-        }catch(Exception e){target.delete();throw e;}
+        try(OutputStream out=new FileOutputStream(temp)){
+            byte[] buf=new byte[65536];int n;
+            while((n=input.read(buf))!=-1){total+=n;
+                if(total>maxBytes)throw new Exception("Arquivo maior que o limite de " +(maxBytes/1_000_000)+" MB");
+                out.write(buf,0,n);
+            }
+        }catch(Exception e){temp.delete();throw e;}
+        if(!temp.renameTo(target)){
+            if(target.exists()&&!target.delete()){temp.delete();throw new Exception("Não foi possível substituir áudio antigo");}
+            if(!temp.renameTo(target)){temp.delete();throw new Exception("Não foi possível salvar o áudio");}
+        }
         return true;
     }
+    private void notifyAudioProgress(String state,String message,int processed,int total){
+        try{
+            JSONObject info=new JSONObject();info.put("state",state);info.put("message",message);
+            info.put("processed",processed);info.put("total",total);
+            final String script="window.cmFastImportProgress && window.cmFastImportProgress("+info.toString()+");";
+            runOnUiThread(()->{if(browser!=null)browser.evaluateJavascript(script,null);});
+        }catch(Exception ignored){}
+    }
+    private String audioDisplayName(Uri uri){
+        try(Cursor cursor=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
+            if(cursor!=null&&cursor.moveToFirst())return safeMediaName(cursor.getString(0));
+        }catch(Exception ignored){}
+        return safeMediaName(uri.getLastPathSegment()==null?"audio":uri.getLastPathSegment());
+    }
+    private void processAudioSelection(ArrayList<Uri> selected){
+        int imported=0;int errors=0;
+        for(int k=0;k<selected.size();k++){
+            Uri uri=selected.get(k);String name=audioDisplayName(uri);
+            notifyAudioProgress("progress","Importando "+name+" ("+(k+1)+"/"+selected.size()+")",k,selected.size());
+            try(InputStream stream=getContentResolver().openInputStream(uri)){
+                if(stream==null)throw new Exception("Não foi possível abrir o arquivo");
+                if(name.toLowerCase(java.util.Locale.US).endsWith(".zip")){
+                    try(ZipInputStream zip=new ZipInputStream(stream)){
+                        ZipEntry entry;int entries=0;
+                        while((entry=zip.getNextEntry())!=null){
+                            if(!entry.isDirectory()&&entries<100){
+                                if(addImportedMedia(zip,entry.getName(),48_000_000))imported++;
+                                entries++;
+                            }
+                            zip.closeEntry();
+                        }
+                    }
+                }else if(addImportedMedia(stream,name,95_000_000))imported++;
+                else throw new Exception("Tipo de áudio não reconhecido: "+name);
+            }catch(Exception ex){errors++;android.util.Log.w("CupheadMascot","Falha ao importar "+name,ex);
+                notifyAudioProgress("progress","Não foi possível importar "+name+": "+ex.getMessage(),k+1,selected.size());}
+        }
+        fastImportActive=false;
+        notifyAudioProgress(errors>0?(imported>0?"partial":"error"):"done",
+            "Importação concluída: "+imported+" áudio(s)"+(errors>0?"; "+errors+" arquivo(s) com erro":""),selected.size(),selected.size());
+    }
     public final class StorageBridge {
+        @JavascriptInterface public String pickAudioFast(String mode){
+            if(fastImportActive)return "Importação já em andamento";
+            runOnUiThread(()->{
+                try{
+                    Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("*/*");
+                    if("zip".equals(mode))intent.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/zip","application/x-zip-compressed","application/octet-stream"});
+                    else intent.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"audio/mpeg","audio/mp3","audio/ogg","audio/wav","audio/x-wav","application/ogg","application/zip","application/x-zip-compressed"});
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivityForResult(intent,FAST_AUDIO_REQUEST);
+                }catch(Exception e){notifyAudioProgress("error","Seletor de arquivos indisponível: "+e.getMessage(),0,0);}
+            });
+            return "OK";
+        }
         @JavascriptInterface public synchronized String beginMediaImport(String name){
             try{if(mediaWrite!=null)mediaWrite.close();
                 stagedMedia=new File(getCacheDir(),"imported_"+System.nanoTime()+"_"+safeMediaName(name));

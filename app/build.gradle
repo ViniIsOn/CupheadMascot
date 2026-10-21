@@ -7,11 +7,11 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.viniison.cupheadmascot.vertical.v14'
+        applicationId 'com.viniison.cupheadmascot.vertical.v173'
         minSdk 29
         targetSdk 35
-        versionCode 7
-        versionName '1.4-controls-music'
+        versionCode 13
+        versionName '1.7.3-fast-audio'
     }
 
     compileOptions {
