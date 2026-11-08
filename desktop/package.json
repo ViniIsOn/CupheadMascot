@@ -1,0 +1,19 @@
+{
+  "name": "cupheadmascot-desktop",
+  "productName": "CupheadMascot",
+  "version": "1.0.0",
+  "description": "CupheadMascot Boss Studio para Windows",
+  "main": "main.js",
+  "author": "ViniIsOn",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build:win": "electron-packager . CupheadMascot --platform=win32 --arch=x64 --out=../dist --overwrite --prune=true"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "@electron/packager": "^19.0.0"
+  }
+}
