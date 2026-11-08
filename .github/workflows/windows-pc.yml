@@ -24,9 +24,11 @@ jobs:
         shell: pwsh
         run: python desktop/prepare_pc.py
       - name: Instalar dependências desktop
-        run: npm install --prefix desktop
+        working-directory: desktop
+        run: npm install
       - name: Empacotar aplicativo Windows x64
-        run: npm run build:win --prefix desktop
+        working-directory: desktop
+        run: npm run build:win
       - name: Criar pacote portátil ZIP
         shell: pwsh
         run: Compress-Archive -Path dist/CupheadMascot-win32-x64/* -DestinationPath CupheadMascot-Windows-x64.zip -CompressionLevel Optimal
