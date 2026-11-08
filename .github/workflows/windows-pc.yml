@@ -1,0 +1,39 @@
+name: Windows Desktop
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'app/src/main/assets/**'
+      - '.github/workflows/windows-pc.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Copiar recursos do jogo e preparar interface PC
+        shell: pwsh
+        run: python desktop/prepare_pc.py
+      - name: Instalar dependências desktop
+        run: npm install --prefix desktop
+      - name: Empacotar aplicativo Windows x64
+        run: npm run build:win --prefix desktop
+      - name: Criar pacote portátil ZIP
+        shell: pwsh
+        run: Compress-Archive -Path dist/CupheadMascot-win32-x64/* -DestinationPath CupheadMascot-Windows-x64.zip -CompressionLevel Optimal
+      - name: Publicar aplicativo Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: CupheadMascot-Windows-x64
+          path: CupheadMascot-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
