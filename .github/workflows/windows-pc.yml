@@ -12,7 +12,7 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Baixar repositório
         uses: actions/checkout@v4
@@ -20,22 +20,42 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Copiar recursos do jogo e preparar interface PC
+      - name: Preparar gerador de áudio original
         shell: pwsh
-        run: python desktop/prepare_pc.py
+        run: |
+          python -m pip install --disable-pip-version-check numpy pillow imageio-ffmpeg
+          python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+      - name: Reconstruir pacote compactado das fontes desktop
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem 'desktop/pc_sources.part*.txt' | Sort-Object Name
+          if ($parts.Count -lt 10) { throw "Fontes desktop incompletas: $($parts.Count) partes" }
+          $encoded = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('desktop/pc_sources.zip', [Convert]::FromBase64String($encoded))
+      - name: Preparar interface desktop e recursos
+        shell: pwsh
+        run: |
+          python desktop/prepare_pc.py
+          node --check desktop/main.js
+          node --check desktop/preload.js
+          node --check desktop/pc-mode.js
+          node --check desktop/game/engine.js
+          $audio = Get-ChildItem desktop/game/audio -Recurse -Filter *.ogg
+          if ($audio.Count -lt 28) { throw "Biblioteca de áudio incompleta: $($audio.Count) arquivos" }
+          if (!(Test-Path desktop/icon.ico)) { throw "Ícone Windows ausente" }
       - name: Instalar dependências desktop
-        working-directory: desktop
-        run: npm install
+        run: npm install --prefix desktop
       - name: Empacotar aplicativo Windows x64
-        working-directory: desktop
-        run: npm run build:win
-      - name: Criar pacote portátil ZIP
-        shell: pwsh
-        run: Compress-Archive -Path dist/CupheadMascot-win32-x64/* -DestinationPath CupheadMascot-Windows-x64.zip -CompressionLevel Optimal
-      - name: Publicar aplicativo Windows
+        run: npm run build:win --prefix desktop
+      - name: Criar três ZIPs menores com caminhos preservados
+        run: python desktop/package_windows_parts.py
+      - name: Publicar partes do aplicativo Windows
         uses: actions/upload-artifact@v4
         with:
-          name: CupheadMascot-Windows-x64
-          path: CupheadMascot-Windows-x64.zip
+          name: CupheadMascot-Windows-x64-parts
+          path: |
+            CupheadMascot_PC_Parte_1.zip
+            CupheadMascot_PC_Parte_2.zip
+            CupheadMascot_PC_Parte_3.zip
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
